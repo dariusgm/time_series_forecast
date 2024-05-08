@@ -2,3 +2,5 @@ pandas
 openpyxl
 plotly-express
 plotly
+scikit-learn
+statsmodels

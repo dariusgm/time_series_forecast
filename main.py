@@ -6,16 +6,10 @@ from statsmodels.tsa.arima.model import ARIMA
 from sklearn.metrics import mean_squared_error
 from math import sqrt
 
-def main():
-    # read excel file
-    xls = pd.read_excel('data/Eltern-Kind Turnen Freitag 16-17.xlsx', sheet_name=None)
-    # xls is a dictionary where the keys are the sheet names and the values are the dataframes
+
+def get_participation(xls):
     participation = {}
-    all_dates = set()
-    all_families = set()
     for sheet_name, df in xls.items():
-        print(f"Processing sheet: {sheet_name}")
-        # now you can process each dataframe (df)
         for index, row in df.iterrows():
             if index < 2:
                 continue
@@ -23,10 +17,8 @@ def main():
             first_name = row['Vorname/Kind']
             last_name = row['Name']
             full_name = f"{first_name} {last_name}"
-            all_families.add(full_name)
             for col in df.columns:
                 if type(col) is datetime.datetime:
-                    all_dates.add(col)
                     key = f"{col.year}-{str(col.month).zfill(2)}-{str(col.day).zfill(2)}"
 
                     if row[col] == 1.0:
@@ -39,14 +31,26 @@ def main():
                     else:
                         participation[key] = {full_name: encoded_value}
 
+    return participation
 
+
+def main():
+    # read excel file
+    xls = pd.read_excel('data/Eltern-Kind Turnen Freitag 16-17.xlsx', sheet_name=None)
+    # xls is a dictionary where the keys are the sheet names and the values are the dataframes
+    participation = get_participation(xls)
 
     print(json.dumps(participation, indent=4))
     df = pd.DataFrame(participation).T
 
 
-    # Convert the index to datetime
-    df.index = pd.to_datetime(df.index)
+
+    # move the the beginning of the week
+    # Resample the data to the start of each week
+    # df = df.resample('W').sum()
+
+    # Now set the frequency of the index
+    # df.index = pd.date_range(start=df.index[0], periods=len(df), freq='W')
 
     # Fill missing participants that later joined with "0"
     df = df.fillna(0)
@@ -60,40 +64,60 @@ def main():
     # Sort the DataFrame by its index (the dates)
     df = df.sort_index()
 
-
     # Sum up the participation of families for each date
-    df_sum = df.sum(axis=1)
+    df = df.sum(axis=1)
+
+    # Convert the index to date
+    df.index = pd.to_datetime(df.index).to_period('W')
 
     # Split the data into training and test sets
-    train = df_sum
-    test = df_sum[int(0.8*len(df_sum)):]
+    train = df
+    test = df[int(0.8 * len(df)):]
 
     # Fit an ARIMA model to the training data
-    model = ARIMA(train, order=(5,1,0))
+    model = ARIMA(train, order=(5, 1, 0))
     model_fit = model.fit()
 
-
     # Use the fitted model to make predictions on the test data
-    predictions = model_fit.predict(start=train.shape[0], end=train.shape[0] + 8, dynamic=False)
+    predictions = model_fit.predict(start=min(train.index), end=max(train.index), dynamic=False, freq='W')
 
-    # map predcitions to include the date of the prediction
-    latest_date = df_sum.index[-1]
-    # todo: map index to date
-
-    predictions.apply(lambda x: x)
-
-    # Calculate the root mean squared error
-    rmse = sqrt(mean_squared_error(test, predictions))
-    print('Test RMSE: %.3f' % rmse)
+    forecast = model_fit.get_forecast(steps=8)
+    predicted_values = forecast.predicted_mean
+    confidence_intervals = forecast.conf_int()
+    # Create a new DataFrame that includes the original data and the predictions
+    print(predicted_values)
+    print(confidence_intervals)
 
     # Create a new DataFrame that includes the original data and the predictions
-    df_total = pd.concat([df_sum, predictions])
-    # Create a heatmap using Plotly Express
-    fig = px.line(df_total, labels={"index": "Date", "value": "Total Families"}, title="Total Families Over Time")
+    # add a label for training data
+    df = df.to_frame()
+    df['data_type'] = 'Training Data'
+    df.rename(columns={0: 'value'}, inplace=True)
+
+    # add a label for predictions
+    predictions_df = predictions.to_frame()
+    predictions_df['data_type'] = 'Predictions'
+    predictions_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
+    # Reset the index of the predictions DataFrame
+    predictions_df = predictions_df.reset_index(drop=True)
+    # Concatenate the DataFrames
+    # Convert the PeriodIndex of df to a RangeIndex
+    df.reset_index(drop=True, inplace=True)
+
+    # Concatenate the DataFrames
+    df_total = pd.concat([df, predictions_df], ignore_index=True)
+
+    # Convert the PeriodIndex to a DateTimeIndex
+    df_total.index = pd.date_range(start=min(df.index), periods=len(df_total))
+
+    # sort index
+    df_total = df_total.sort_index()
+
+    # Use Plotly Express to create the line plot
+    fig = px.line(df_total, x=df_total.index, y='value', color='data_type', color_discrete_sequence=['blue', 'red'])
+
+    # Show the plot
     fig.show()
-
-
-
 
 if __name__ == '__main__':
     main()

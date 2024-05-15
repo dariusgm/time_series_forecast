@@ -70,6 +70,9 @@ def main():
     # Convert the index to date
     df.index = pd.to_datetime(df.index).to_period('W')
 
+    # save min index for plotting
+    min_index = min(df.index)
+
     # Split the data into training and test sets
     train = df
     test = df[int(0.8 * len(df)):]
@@ -108,7 +111,7 @@ def main():
     df_total = pd.concat([df, predictions_df], ignore_index=True)
 
     # Convert the PeriodIndex to a DateTimeIndex
-    df_total.index = pd.date_range(start=min(df.index), periods=len(df_total))
+    df_total.index = pd.date_range(start=min_index.end_time, periods=len(df_total))
 
     # sort index
     df_total = df_total.sort_index()

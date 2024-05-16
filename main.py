@@ -1,13 +1,12 @@
 import datetime
-import json
-import plotly.express as px
-import pandas as pd
-from statsmodels.tsa.arima.model import ARIMA
-from sklearn.metrics import mean_squared_error
-from math import sqrt
-import plotly.graph_objects as go
 
-def get_participation(xls):
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.graph_objs import Figure
+from statsmodels.tsa.arima.model import ARIMA, ARIMAResults
+
+
+def get_participation(xls: dict[str, pd.DataFrame]) -> dict[str, dict[str, int]]:
     participation = {}
     for sheet_name, df in xls.items():
         for index, row in df.iterrows():
@@ -34,7 +33,7 @@ def get_participation(xls):
     return participation
 
 
-def prepare_data(participation):
+def prepare_data(participation: dict[str, dict[str, int]]) -> pd.Series:
     df = pd.DataFrame(participation).T
 
     # Fill missing participants that later joined with "0"
@@ -56,12 +55,14 @@ def prepare_data(participation):
     df.index = pd.to_datetime(df.index).to_period('W')
 
     return df
-def plot(train_df, test_df, forecast_df, confidence_df):
-    # create new figure
-    fig = go.Figure()
 
-    # Use Plotly Express to create the line plot
-    # fig = px.line(df, x=df.index, y='value', color='red')
+
+def plot(train_df: pd.DataFrame,
+         test_df: pd.DataFrame,
+         forecast_df: pd.DataFrame,
+         confidence_df: pd.DataFrame) -> Figure:
+    # create a new figure
+    fig = go.Figure()
 
     # Add the training data to the plot
     fig.add_trace(go.Scatter(
@@ -96,7 +97,7 @@ def plot(train_df, test_df, forecast_df, confidence_df):
         y=confidence_df['upper y'],
         mode='lines',
         line=dict(width=0),
-        showlegend=False,
+        showlegend=True,
         name='upper'
     ))
     fig.add_trace(go.Scatter(
@@ -106,46 +107,54 @@ def plot(train_df, test_df, forecast_df, confidence_df):
         line=dict(width=0),
         fill='tonexty',
         fillcolor='rgba(0,0,0,0.2)',
-        showlegend=False,
+        showlegend=True,
         name='lower'
     ))
 
     return fig
 
-def split(df):
+
+def split(df: pd.Series) -> tuple[pd.Series, pd.Series]:
     # Split the data into training and test sets
     train = df[:int(0.8 * len(df))]
     test = df[int(0.8 * len(df)):]
 
     return train, test
 
-def train_model(train, test):
+
+def train_model(train: pd.Series, test: pd.Series) -> tuple[pd.Series, ARIMAResults]:
     # Fit an ARIMA model to the training data
     model = ARIMA(train, order=(5, 1, 0))
     model_fit = model.fit()
 
     # Use the fitted model to make predictions on the test data
-    predictions = model_fit.predict(start=min(test.index), end=max(test.index), dynamic=False, freq='W')
+    predictions = model_fit.predict(start=min(test.index), end=max(test.index), dynamic=False)
 
     return predictions, model_fit
 
-def build_train_for_plot(train):
+
+def build_train_for_plot(train: pd.Series) -> pd.DataFrame:
     train_df = train.to_frame()
     train_df['data_type'] = 'Train Data'
     train_df.rename(columns={0: 'value'}, inplace=True)
-    train_df.index = pd.date_range(start=min(train_df.index).end_time,  end=max(train_df.index).end_time, periods=len(train_df))
+    train_df.index = pd.date_range(start=min(train_df.index).end_time, end=max(train_df.index).end_time,
+                                   periods=len(train_df))
     return train_df
 
-def build_test_for_plot(test, start):
+
+def build_test_for_plot(test: pd.Series, start: pd.Timestamp) -> pd.DataFrame:
     test_df = test.to_frame()
     test_df['data_type'] = 'Test Data'
     test_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
     test_df.index = pd.date_range(start=start, periods=len(test_df), freq='W')
     return test_df
 
-def build_forecast_for_plot(model_fit, len_test, train_series):
-    # get starting point for plotting
-    start = max(train_series.index).end_time
+
+def build_forecast_for_plot(
+        model_fit: ARIMAResults,
+        len_test: int,
+        start: pd.Timestamp) -> tuple[
+    pd.DataFrame, pd.DataFrame]:
     # Forecast the next 8 weeks and the test data
     forecast = model_fit.get_forecast(steps=8 + len_test)
     predicted_values = forecast.predicted_mean
@@ -160,6 +169,7 @@ def build_forecast_for_plot(model_fit, len_test, train_series):
     confidence_df.rename(columns={0: 'lower', 1: 'upper'}, inplace=True)
     confidence_df.index = pd.date_range(start=start, periods=len(confidence_df), freq='W')
     return forecast_df, confidence_df
+
 
 def main():
     # read Excel file
@@ -176,9 +186,10 @@ def main():
 
     train_df = build_train_for_plot(train_series)
     test_df = build_test_for_plot(predictions, max(train_df.index))
-    forecast_df, confidence_df = build_forecast_for_plot(model_fit, len(test_series), train_series)
+    forecast_df, confidence_df = build_forecast_for_plot(model_fit, len(test_series), max(train_series.index).end_time)
     fig = plot(train_df, test_df, forecast_df, confidence_df)
     fig.show()
+
 
 if __name__ == '__main__':
     main()

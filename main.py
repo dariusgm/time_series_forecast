@@ -56,67 +56,7 @@ def prepare_data(participation):
     df.index = pd.to_datetime(df.index).to_period('W')
 
     return df
-
-def main():
-    # read Excel file
-    xls = pd.read_excel('data/Eltern-Kind Turnen Freitag 16-17.xlsx', sheet_name=None)
-    # xls is a dictionary where the keys are the sheet names and the values are the dataframes
-    participation = get_participation(xls)
-
-    # Prepare the data
-    df = prepare_data(participation)
-    df.sort_index(inplace=True)
-
-    # Split the data into training and test sets
-    train = df[:int(0.8 * len(df))]
-    test = df[int(0.8 * len(df)):]
-
-    # Fit an ARIMA model to the training data
-    model = ARIMA(train, order=(5, 1, 0))
-    model_fit = model.fit()
-
-    # Use the fitted model to make predictions on the test data
-    predictions = model_fit.predict(start=min(test.index), end=max(test.index), dynamic=False, freq='W')
-
-    # plot the Training Data
-    train_df = train.to_frame()
-    train_df['data_type'] = 'Train Data'
-    train_df.rename(columns={0: 'value'}, inplace=True)
-    train_df.index = pd.date_range(start=min(train_df.index).end_time,  end=max(train_df.index).end_time, periods=len(train_df))
-    train_df.sort_index(inplace=True)
-
-    # plot the Predictions on Test Data
-    test_df = predictions.to_frame()
-    test_df['data_type'] = 'Test Data'
-    test_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
-    test_df.index = pd.date_range(start=max(train_df.index), periods=len(test_df), freq='W')
-    test_df.sort_index(inplace=True)
-
-    # plot the forecast
-    forecast = model_fit.get_forecast(steps=8 + len(test))
-    predicted_values = forecast.predicted_mean
-    forecast_df = pd.DataFrame(predicted_values)
-    forecast_df['data_type'] = 'Forecast'
-    forecast_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
-    forecast_df.index = pd.date_range(start=max(train.index).end_time, periods=len(forecast_df), freq='W')
-    forecast_df.sort_index(inplace=True)
-    confidence_intervals = forecast.conf_int()
-
-
-    # Create a new DataFrame for the confidence intervals
-    confidence_df = pd.DataFrame(confidence_intervals)
-    confidence_df['data_type'] = 'Confidence Interval'
-    confidence_df.rename(columns={0: 'lower', 1: 'upper'}, inplace=True)
-    # Convert the PeriodIndex to a DateTimeIndex
-    confidence_df.index = pd.date_range(start=max(train.index).end_time, periods=len(confidence_df), freq='W')
-    confidence_df.sort_index(inplace=True)
-
-    # Concatenate the DataFrames
-    df_total = pd.concat([train_df, test_df, forecast_df, confidence_df], ignore_index=True)
-
-    # Sort index
-    df_total = df_total.sort_index()
-
+def plot(train_df, test_df, forecast_df, confidence_df):
     # create new figure
     fig = go.Figure()
 
@@ -170,7 +110,74 @@ def main():
         name='lower'
     ))
 
-    # Show the plot
+    return fig
+
+def split(df):
+    # Split the data into training and test sets
+    train = df[:int(0.8 * len(df))]
+    test = df[int(0.8 * len(df)):]
+
+    return train, test
+
+def train_model(train, test):
+    # Fit an ARIMA model to the training data
+    model = ARIMA(train, order=(5, 1, 0))
+    model_fit = model.fit()
+
+    # Use the fitted model to make predictions on the test data
+    predictions = model_fit.predict(start=min(test.index), end=max(test.index), dynamic=False, freq='W')
+
+    return predictions, model_fit
+
+def build_train_for_plot(train):
+    train_df = train.to_frame()
+    train_df['data_type'] = 'Train Data'
+    train_df.rename(columns={0: 'value'}, inplace=True)
+    train_df.index = pd.date_range(start=min(train_df.index).end_time,  end=max(train_df.index).end_time, periods=len(train_df))
+    return train_df
+
+def build_test_for_plot(test, start):
+    test_df = test.to_frame()
+    test_df['data_type'] = 'Test Data'
+    test_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
+    test_df.index = pd.date_range(start=start, periods=len(test_df), freq='W')
+    return test_df
+
+def build_forecast_for_plot(model_fit, len_test, train_series):
+    # get starting point for plotting
+    start = max(train_series.index).end_time
+    # Forecast the next 8 weeks and the test data
+    forecast = model_fit.get_forecast(steps=8 + len_test)
+    predicted_values = forecast.predicted_mean
+    forecast_df = pd.DataFrame(predicted_values)
+    forecast_df['data_type'] = 'Forecast'
+    forecast_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
+    forecast_df.index = pd.date_range(start=start, periods=len(forecast_df), freq='W')
+
+    confidence_intervals = forecast.conf_int()
+    confidence_df = pd.DataFrame(confidence_intervals)
+    confidence_df['data_type'] = 'Confidence Interval'
+    confidence_df.rename(columns={0: 'lower', 1: 'upper'}, inplace=True)
+    confidence_df.index = pd.date_range(start=start, periods=len(confidence_df), freq='W')
+    return forecast_df, confidence_df
+
+def main():
+    # read Excel file
+    xls = pd.read_excel('data/Eltern-Kind Turnen Freitag 16-17.xlsx', sheet_name=None)
+    # xls is a dictionary where the keys are the sheet names and the values are the dataframes
+    participation = get_participation(xls)
+
+    # Prepare the data
+    df = prepare_data(participation)
+
+    # Split the data into training and test sets
+    train_series, test_series = split(df)
+    predictions, model_fit = train_model(train_series, test_series)
+
+    train_df = build_train_for_plot(train_series)
+    test_df = build_test_for_plot(predictions, max(train_df.index))
+    forecast_df, confidence_df = build_forecast_for_plot(model_fit, len(test_series), train_series)
+    fig = plot(train_df, test_df, forecast_df, confidence_df)
     fig.show()
 
 if __name__ == '__main__':

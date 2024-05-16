@@ -34,23 +34,8 @@ def get_participation(xls):
     return participation
 
 
-def main():
-    # read excel file
-    xls = pd.read_excel('data/Eltern-Kind Turnen Freitag 16-17.xlsx', sheet_name=None)
-    # xls is a dictionary where the keys are the sheet names and the values are the dataframes
-    participation = get_participation(xls)
-
-    print(json.dumps(participation, indent=4))
+def prepare_data(participation):
     df = pd.DataFrame(participation).T
-
-
-
-    # move the the beginning of the week
-    # Resample the data to the start of each week
-    # df = df.resample('W').sum()
-
-    # Now set the frequency of the index
-    # df.index = pd.date_range(start=df.index[0], periods=len(df), freq='W')
 
     # Fill missing participants that later joined with "0"
     df = df.fillna(0)
@@ -70,6 +55,17 @@ def main():
     # Convert the index to date
     df.index = pd.to_datetime(df.index).to_period('W')
 
+    return df
+
+def main():
+    # read Excel file
+    xls = pd.read_excel('data/Eltern-Kind Turnen Freitag 16-17.xlsx', sheet_name=None)
+    # xls is a dictionary where the keys are the sheet names and the values are the dataframes
+    participation = get_participation(xls)
+
+    # Prepare the data
+    df = prepare_data(participation)
+
     # save min index for plotting
     min_index = min(df.index)
 
@@ -82,33 +78,35 @@ def main():
     model_fit = model.fit()
 
     # Use the fitted model to make predictions on the test data
-    predictions = model_fit.predict(start=min(train.index), end=max(train.index), dynamic=False, freq='W')
+    predictions = model_fit.predict(start=min(test.index), end=max(test.index), dynamic=False, freq='W')
 
-    forecast = model_fit.get_forecast(steps=8)
-    predicted_values = forecast.predicted_mean
-    confidence_intervals = forecast.conf_int()
-    # Create a new DataFrame that includes the original data and the predictions
-    print(predicted_values)
-    print(confidence_intervals)
-
-    # Create a new DataFrame that includes the original data and the predictions
-    # add a label for training data
+    # plot the Training Data
     df = df.to_frame()
     df['data_type'] = 'Training Data'
     df.rename(columns={0: 'value'}, inplace=True)
 
-    # add a label for predictions
-    predictions_df = predictions.to_frame()
-    predictions_df['data_type'] = 'Predictions'
-    predictions_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
+    # plot the Predictions on Test Data
+    test_df = predictions.to_frame()
+    test_df['data_type'] = 'Test Data'
+    test_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
+
+    # plot the forecast
+    forecast = model_fit.get_forecast(steps=8)
+    predicted_values = forecast.predicted_mean
+    forecast_df = pd.DataFrame(predicted_values)
+    forecast_df['data_type'] = 'Forecast'
+    forecast_df.rename(columns={'predicted_mean': 'value'}, inplace=True)
+    confidence_intervals = forecast.conf_int()
+
+
     # Reset the index of the predictions DataFrame
-    predictions_df = predictions_df.reset_index(drop=True)
+    # test_df = test_df.reset_index(drop=True)
     # Concatenate the DataFrames
     # Convert the PeriodIndex of df to a RangeIndex
-    df.reset_index(drop=True, inplace=True)
+    # df.reset_index(drop=True, inplace=True)
 
     # Concatenate the DataFrames
-    df_total = pd.concat([df, predictions_df], ignore_index=True)
+    df_total = pd.concat([df, test_df, forecast_df], ignore_index=False)
 
     # Convert the PeriodIndex to a DateTimeIndex
     df_total.index = pd.date_range(start=min_index.end_time, periods=len(df_total))
@@ -117,7 +115,7 @@ def main():
     df_total = df_total.sort_index()
 
     # Use Plotly Express to create the line plot
-    fig = px.line(df_total, x=df_total.index, y='value', color='data_type', color_discrete_sequence=['blue', 'red'])
+    fig = px.line(df_total, x=df_total.index, y='value', color='data_type', color_discrete_sequence=['blue', 'red', 'green'])
 
     # Show the plot
     fig.show()
